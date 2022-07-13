@@ -147,8 +147,7 @@ contract RocketMinipoolDelegate is RocketMinipoolStorageLayout, RocketMinipoolIn
     // Only accepts calls from the RocketDepositPool contract
     function userDeposit() override external payable onlyLatestContract("rocketDepositPool", msg.sender) onlyInitialised {
         // Check current status & user deposit status
-        require(status >= MinipoolStatus.Initialised && status <= MinipoolStatus.Staking, "The user deposit can only be assigned while initialised, in prelaunch, or staking");
-        // TODO - not sure if the second parameter now needs to be MinipoolStatus.RequestedWithdrawable
+        require(status >= MinipoolStatus.Initialised && status <= MinipoolStatus.RequestedWithdrawable, "The user deposit can only be assigned while initialised, in prelaunch, staking, or requestedWithdrawable");
         require(userDepositAssignedTime == 0, "The user deposit has already been assigned");
         // Progress initialised minipool to prelaunch
         if (status == MinipoolStatus.Initialised) { setStatus(MinipoolStatus.Prelaunch); }
@@ -282,8 +281,10 @@ contract RocketMinipoolDelegate is RocketMinipoolStorageLayout, RocketMinipoolIn
     function distributeBalanceAndFinalise() override external onlyInitialised onlyMinipoolOwnerOrWithdrawalAddress(msg.sender) {
         // Can only call if withdrawable and can only be called once
         require(status == MinipoolStatus.Withdrawable, "Minipool must be withdrawable");
+        // Get withdrawal amount, we must also account for a possible node refund balance on the contract from users staking 32 ETH that have received a 16 ETH refund after the protocol bought out 16 ETH
+        uint256 totalBalance = address(this).balance.sub(nodeRefundBalance);
         // Process withdrawal
-        distributeBalance();
+        _distributeBalance(totalBalance);
         // Finalise the pool
         _finalise();
     }
@@ -292,9 +293,9 @@ contract RocketMinipoolDelegate is RocketMinipoolStorageLayout, RocketMinipoolIn
     // Can be called by:
     // - Owner; at any time once minipool is withdrawable (withdrawable state set by oDAO)
     // - Owner; when minipool state has been requestedWithdrawable for more than 2 days (no reliance on oDAO)
-    // - Anyone; when minipool state is staking and balance is > 16 ETH (no reliance on owner or oDAO)
-    // - Anyone; when minipool state has been requestedWithdrawable for at least 14 days and balance is > 16 ETH (no reliance on owner or oDAO)
-    // - Anyone; when minipool state has been withdrawable for 14 days and balance is between > 4 ETH (no reliance on owner)
+    // - Non-owner; when minipool state is staking and balance is > 16 ETH (no reliance on owner or oDAO)
+    // - Non-owner; when minipool state has been requestedWithdrawable for at least 14 days and balance is > 16 ETH (no reliance on owner or oDAO)
+    // - Non-owner; when minipool state has been withdrawable for 14 days and balance is between > 4 ETH (no reliance on owner)
     // The first two can be used for arbitrage by an owner (along with a bundled rETH burn)
     //
     // There is currently no solution for the following scenarios:
@@ -311,7 +312,7 @@ contract RocketMinipoolDelegate is RocketMinipoolStorageLayout, RocketMinipoolIn
             } else if (status == MinipoolStatus.RequestedWithdrawable) {
                 require(block.timestamp > statusTime.add(2 days), "After requesting withdrawable, owner must wait either 2 days OR for the state to get updated by oDAO");
             } else {
-                require(false);
+                require(false, "Minipool state must be Withdrawable or RequestedWithdrawable");
             }
         } else {
             if (status == MinipoolStatus.Staking || status == MinipoolStatus.RequestedWithdrawable) {
