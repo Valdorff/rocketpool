@@ -273,36 +273,36 @@ contract RocketMinipoolDelegate is RocketMinipoolStorageLayout, RocketMinipoolIn
     function distributeBalanceAndFinalise() override external onlyInitialised onlyMinipoolOwnerOrWithdrawalAddress(msg.sender) {
         // Can only call if withdrawable and can only be called once
         require(status == MinipoolStatus.Withdrawable, "Minipool must be withdrawable");
-        // Get withdrawal amount, we must also account for a possible node refund balance on the contract from users staking 32 ETH that have received a 16 ETH refund after the protocol bought out 16 ETH
-        uint256 totalBalance = address(this).balance.sub(nodeRefundBalance);
         // Process withdrawal
-        _distributeBalance(totalBalance);
+        distributeBalance();
         // Finalise the pool
         _finalise();
     }
 
     // Distributes the contract's balance
-    // When called during staking status, requires 16 ether in the pool
-    // When called by non-owner with less than 16 ether, requires 14 days to have passed since being made withdrawable
+    // Can be called by:
+    // - Owner at any time once minipool is withdrawable (withdrawable state set by oDAO)
+    // - Owner more than 2 days after minipool is requested_withdrawable (no reliance on oDAO)
+    // - Anyone when minipool state has been unchanged for 14 days (fallback with no reliance on
+    //   either oDAO or owner)
+    // The first two can be used for arbitrage by an owner (along with a bundled rETH burn)
     function distributeBalance() override external onlyInitialised {
-        // Must be called while staking or withdrawable
-        require(status == MinipoolStatus.Staking || status == MinipoolStatus.Withdrawable, "Minipool must be staking or withdrawable");
         // Get withdrawal amount, we must also account for a possible node refund balance on the contract from users staking 32 ETH that have received a 16 ETH refund after the protocol bought out 16 ETH
         uint256 totalBalance = address(this).balance.sub(nodeRefundBalance);
         // Get node withdrawal address
         address nodeWithdrawalAddress = rocketStorage.getNodeWithdrawalAddress(nodeAddress);
-        // If it's not the owner calling
-        if (msg.sender != nodeAddress && msg.sender != nodeWithdrawalAddress) {
-            // And the pool is in staking status
-            if (status == MinipoolStatus.Staking) {
-                // Then balance must be greater than 16 ETH
-                require(totalBalance >= 16 ether, "Balance must be greater than 16 ETH");
+        if (msg.sender == nodeAddress || msg.sender == nodeWithdrawalAddress) {
+            if (status == MinipoolStatus.Withdrawable) {
+                // Owner and state is withdrawable - no further requirements
+            } else if (status == MinipoolStatus.RequestedWithdrawable) {
+                require(block.timestamp > statusTime.add(2 days), "After requesting withdrawable, owner must wait either 2 dayrs OR for the state to get updated by oDAO");
             } else {
-                // Then enough time must have elapsed
-                require(block.timestamp > statusTime.add(14 days), "Non-owner must wait 14 days after withdrawal to distribute balance");
-                // And balance must be greater than 4 ETH
-                require(address(this).balance >= 4 ether, "Balance must be greater than 4 ETH");
+                require(false);
             }
+        } else {
+            // This option is a fallback. Must handle cases like a forced exit (so not marked as RequestedWithdrawable) with oDAO failing to mark pools as withdrawable.
+            require(status == MinipoolStatus.Staking || status == MinipoolStatus.RequestedWithdrawable || status == MinipoolStatus.Withdrawable, "Minipool must be staking OR requested withdrawable OR withdrawable");
+            require(block.timestamp > statusTime.add(14 days), "Non-owner must wait 14 days after status update to distribute balance");
         }
         // Process withdrawal
         _distributeBalance(totalBalance);
