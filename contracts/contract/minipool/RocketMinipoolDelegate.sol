@@ -148,6 +148,7 @@ contract RocketMinipoolDelegate is RocketMinipoolStorageLayout, RocketMinipoolIn
     function userDeposit() override external payable onlyLatestContract("rocketDepositPool", msg.sender) onlyInitialised {
         // Check current status & user deposit status
         require(status >= MinipoolStatus.Initialised && status <= MinipoolStatus.Staking, "The user deposit can only be assigned while initialised, in prelaunch, or staking");
+        // TODO - not sure if the second parameter now needs to be MinipoolStatus.RequestedWithdrawable
         require(userDepositAssignedTime == 0, "The user deposit has already been assigned");
         // Progress initialised minipool to prelaunch
         if (status == MinipoolStatus.Initialised) { setStatus(MinipoolStatus.Prelaunch); }
@@ -256,7 +257,7 @@ contract RocketMinipoolDelegate is RocketMinipoolStorageLayout, RocketMinipoolIn
         // Get contracts
         RocketMinipoolManagerInterface rocketMinipoolManager = RocketMinipoolManagerInterface(getContractAddress("rocketMinipoolManager"));
         // Check current status
-        require(status == MinipoolStatus.Staking, "The minipool can only become withdrawable while staking");
+        require(status == MinipoolStatus.Staking || status = RequestedWithdrawable, "The minipool can only become withdrawable while staking or requested withdrawable");
         // Progress to withdrawable
         setStatus(MinipoolStatus.Withdrawable);
         // Remove minipool from queue
@@ -267,6 +268,14 @@ contract RocketMinipoolDelegate is RocketMinipoolStorageLayout, RocketMinipoolIn
         }
         // Decrement the node operator's staking minipool count
         rocketMinipoolManager.decrementNodeStakingMinipoolCount(nodeAddress);
+    }
+
+    // Only needs to be called if exiting owner is arbitraging
+    // Should be called before the validator is fully exited (including going through exit queue)
+    // Once this is called, distributeBalance() will lock out non-owners for 14 days
+    // This allows owner to bundle distributeBalance() call with a rETH burn to arbitrage
+    function requestWithdrawable() override external onlyInitialised onlyMinipoolOwnerOrWithdrawalAddress(msg.sender) {
+        setStatus(MinipoolStatus.RequestWithdrawable);
     }
 
     // Distributes the contract's balance and finalises the pool
