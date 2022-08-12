@@ -140,15 +140,15 @@ contract RocketMinipoolDelegate is RocketMinipoolStorageLayout, RocketMinipoolIn
         // Perform the pre-stake to lock in withdrawal credentials on beacon chain
         preStake(_validatorPubkey, _validatorSignature, _depositDataRoot);
 
-        if (depositType == MinipoolDeposit.Full) {
-            // Progress full minipool to prelaunch
+        // Deposit ETH without minting rETH
+        nodeDepositBalance = msg.value;
+
+        if (nodeDepositBalance == getLaunchBalance()) {
+            // Proceed to prelaunch immediately
             setStatus(MinipoolStatus.Prelaunch);
             nodeDepositBalance = msg.value;
             nodeDepositAssigned = true;
         } else {
-            // Deposit ETH without minting rETH
-            nodeDepositBalance = msg.value;
-
             // Transfer to vault directly instead of via processDeposits to avoid assigning twice
             RocketVaultInterface rocketVault = RocketVaultInterface(getContractAddress("rocketVault"));
             rocketVault.depositEther{value: msg.value}();
@@ -163,15 +163,19 @@ contract RocketMinipoolDelegate is RocketMinipoolStorageLayout, RocketMinipoolIn
         require(userDepositAssignedTime == 0, "The user deposit has already been assigned");
         // Progress initialised minipool to prelaunch
         if (status == MinipoolStatus.Initialised) { setStatus(MinipoolStatus.Prelaunch); }
-        // Update user deposit details
-        userDepositBalance = msg.value;
-        userDepositAssignedTime = block.timestamp;
-        // Refinance full minipool
+
         if (depositType == MinipoolDeposit.Full) {
-            // Update node balances
+            // Refinance full minipool
             nodeDepositBalance = nodeDepositBalance.sub(msg.value);
             nodeRefundBalance = nodeRefundBalance.add(msg.value);
         }
+
+
+        nodeDepositAssigned = true; // indicate that the node deposit was returned for Efficient queue
+        // Update user deposit details
+        userDepositBalance = msg.value;
+        userDepositAssignedTime = block.timestamp;
+
         // Emit ether deposited event
         emit EtherDeposited(msg.sender, msg.value, block.timestamp);
     }
