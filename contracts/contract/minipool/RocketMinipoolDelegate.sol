@@ -5,6 +5,7 @@ pragma solidity 0.7.6;
 import "@openzeppelin/contracts/math/SafeMath.sol";
 
 import "./RocketMinipoolStorageLayout.sol";
+import "../../interface/RocketVaultInterface.sol";
 import "../../interface/casper/DepositInterface.sol";
 import "../../interface/deposit/RocketDepositPoolInterface.sol";
 import "../../interface/minipool/RocketMinipoolInterface.sol";
@@ -17,6 +18,7 @@ import "../../interface/node/RocketNodeStakingInterface.sol";
 import "../../interface/dao/protocol/settings/RocketDAOProtocolSettingsMinipoolInterface.sol";
 import "../../interface/dao/node/settings/RocketDAONodeTrustedSettingsMinipoolInterface.sol";
 import "../../interface/dao/protocol/settings/RocketDAOProtocolSettingsNodeInterface.sol";
+import "../../interface/dao/protocol/settings/RocketDAOProtocolSettingsDepositInterface.sol";
 import "../../interface/dao/node/RocketDAONodeTrustedInterface.sol";
 import "../../interface/network/RocketNetworkFeesInterface.sol";
 import "../../interface/token/RocketTokenRETHInterface.sol";
@@ -131,16 +133,26 @@ contract RocketMinipoolDelegate is RocketMinipoolStorageLayout, RocketMinipoolIn
     function nodeDeposit(bytes calldata _validatorPubkey, bytes calldata _validatorSignature, bytes32 _depositDataRoot) override external payable onlyLatestContract("rocketNodeDeposit", msg.sender) onlyInitialised {
         // Check current status & node deposit status
         require(status == MinipoolStatus.Initialised, "The node deposit can only be assigned while initialised");
-        require(!nodeDepositAssigned, "The node deposit has already been assigned");
-        // Progress full minipool to prelaunch
-        if (depositType == MinipoolDeposit.Full) { setStatus(MinipoolStatus.Prelaunch); }
-        // Update node deposit details
-        nodeDepositBalance = msg.value;
-        nodeDepositAssigned = true;
+        require(nodeDepositBalance == 0, "The minipool already has a previous nodeDeposit");
+
         // Emit ether deposited event
         emit EtherDeposited(msg.sender, msg.value, block.timestamp);
         // Perform the pre-stake to lock in withdrawal credentials on beacon chain
         preStake(_validatorPubkey, _validatorSignature, _depositDataRoot);
+
+        if (depositType == MinipoolDeposit.Full) {
+            // Progress full minipool to prelaunch
+            setStatus(MinipoolStatus.Prelaunch);
+            nodeDepositBalance = msg.value;
+            nodeDepositAssigned = true;
+        } else {
+            // Deposit ETH without minting rETH
+            nodeDepositBalance = msg.value;
+
+            // Transfer to vault directly instead of via processDeposits to avoid assigning twice
+            RocketVaultInterface rocketVault = RocketVaultInterface(getContractAddress("rocketVault"));
+            rocketVault.depositEther{value: msg.value}();
+        }
     }
 
     // Assign user deposited ETH to the minipool and mark it as prelaunch
