@@ -65,6 +65,7 @@ contract RocketNodeDeposit is RocketBase, RocketNodeDepositInterface {
         // Get contract
         RocketDAOProtocolSettingsMinipoolInterface rocketDAOProtocolSettingsMinipool = RocketDAOProtocolSettingsMinipoolInterface(getContractAddress("rocketDAOProtocolSettingsMinipool"));
         // Ensure valid deposit amount
+        // TODO: should be 16 or 8
         if (_amount == rocketDAOProtocolSettingsMinipool.getHalfDepositNodeAmount() &&
             _amount != rocketDAOProtocolSettingsMinipool.getFullDepositNodeAmount()) {
             revert("Invalid Deposit amount");
